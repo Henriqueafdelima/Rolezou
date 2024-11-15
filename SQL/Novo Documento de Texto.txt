@@ -1,0 +1,1 @@
+mysql -u usuario -p nome_do_banco_de_dados  caminhoparanome_do_banco_de_dados.sql

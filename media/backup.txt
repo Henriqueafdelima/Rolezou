@@ -1,0 +1,206 @@
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+from werkzeug.security import generate_password_hash, check_password_hash
+import mysql.connector
+import secrets
+import os
+from werkzeug.utils import secure_filename
+
+app = Flask(__name__)
+app.secret_key = secrets.token_hex(32)  # Chave secreta para usar flash messages
+app.config['UPLOAD_FOLDER'] = 'static/uploads'
+app.config['ALLOWED_EXTENSIONS'] = ['png', 'jpg', 'jpeg', 'gif']
+
+# Configurações do banco de dados
+db_config = {
+    'user': 'root',
+    'password': 'Vencedor4s',
+    'host': 'localhost',
+    'database': 'rolezou'
+}
+
+# Função para verificar se o usuário está autenticado
+def esta_autenticado():
+    return 'usuario' in session
+
+
+def get_db_connection():
+    return mysql.connector.connect(**db_config)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+
+# Rota para a página de login
+@app.route('/', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        nick = request.form['nickname']
+        password = request.form['senha']
+        
+        if verificar_credenciais(nick, password):
+            session['usuario'] = nick  # Criar sessão de usuário
+            flash('Login bem-sucedido!', 'success')
+            flash(f'Bem-vindo, {nick}!', 'info')
+            return redirect(url_for('index'))
+        else:
+            flash('Credenciais inválidas. Tente novamente.', 'danger')
+    
+    return render_template('login.html')
+
+# Rota para a página de cadastro
+@app.route('/cadastro', methods=['GET', 'POST'])
+def cadastro():
+    if request.method == 'POST':
+        nick = request.form['nickname']
+        primeiro_nome = request.form['nome']
+        ultimo_nome = request.form['sobrenome']
+        email = request.form['email']
+        telefone = request.form['telefone']
+        senha = request.form['senha']
+        
+        if nick and primeiro_nome and ultimo_nome and email and telefone and senha:
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                
+                # Gerar hash da senha antes de armazenar no banco de dados
+                password_hash = generate_password_hash(senha)
+                
+                cursor.execute("INSERT INTO usuarios (nick, primeiro_nome, ultimo_nome, email, telefone, password_hash) VALUES (%s, %s, %s, %s, %s, %s)", (nick, primeiro_nome, ultimo_nome, email, telefone, password_hash))
+                conn.commit()
+                
+                flash('Usuário registrado com sucesso!', 'success')
+                return redirect(url_for('cadastro'))
+            except mysql.connector.Error as err:
+                flash(f'Erro ao registrar usuário: {err}', 'danger')
+            finally:
+                cursor.close()
+                conn.close()
+        else:
+            flash('Por favor, preencha todos os campos!', 'warning')
+    
+    return render_template('cadastro.html')
+
+# Rota para fazer logout
+@app.route('/logout')
+def logout():
+    session.pop('usuario', None)  # Encerrar sessão do usuário
+    flash('Você foi desconectado com sucesso.', 'info')
+    return redirect(url_for('login'))
+
+# Rota para a página restrita
+@app.route('/index', methods=['GET', 'POST'])
+def index():
+    if not esta_autenticado():
+        flash('Você precisa fazer login para acessar esta página.', 'warning')
+        return redirect(url_for('login'))
+    
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT registro_evento, nome_evento, descricao endereco, data_evento, horario_evento, preco, imagem FROM eventos")
+    eventos = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    return render_template('index.html', eventos=eventos)
+
+
+@app.route('/criar_evento', methods=['GET', 'POST'])
+def criar_evento():
+    if not esta_autenticado():
+        flash('Você precisa fazer login para acessar esta página.', 'warning')
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        titulo = request.form['titulo']
+        descricao = request.form['descricao']
+        endereco = request.form['endereco']
+        cep = request.form['cep']
+        data = request.form['data']
+        horario = request.form['horario_evento']
+        file = request.files['imagem']
+        preco = request.form['preco']
+        criador = session['usuario']
+
+         # Obter o ID do usuário criador
+        criador_id = None
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT registro_usuario FROM usuarios WHERE nick = %s", (criador,))
+        result = cursor.fetchone()
+        if result:
+            criador_id = result[0]
+        cursor.close()
+        conn.close()
+        
+        if titulo and descricao and endereco and cep and data and horario and file and preco and allowed_file(file.filename):
+
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            print(f'Saving file to: {filepath}')
+            file.save(filepath)
+            print('File saved successfully.')
+
+
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("INSERT INTO eventos (registro_usuario, nome_evento, descricao, endereco, cep, data_evento, horario_evento, imagem, preco, criado_por) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", (titulo, descricao, endereco, cep, data, horario, filename, preco, criador, criador_id))
+                conn.commit()
+                flash('Evento criado com sucesso!', 'success')
+                return redirect(url_for('index'))
+            except mysql.connector.Error as err:
+                flash(f'Erro ao criar evento: {err}', 'danger')
+            finally:
+                cursor.close()
+                conn.close()
+        else:
+            flash('Por favor, preencha todos os campos!', 'warning')
+    
+    return render_template('criar_evento.html')
+
+
+
+@app.route('/evento/<int:registro_evento>')
+def evento(registro_evento):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT registro_evento, nome_evento, descricao, endereco, data_evento, horario_evento, preco, imagem, criado_por FROM eventos WHERE registro_evento = %s", (registro_evento,))
+    evento = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if evento:
+        return render_template('evento.html', evento=evento)
+    else:
+        flash('Evento não encontrado.', 'danger')
+        return redirect(url_for('index'))
+
+
+
+
+
+# Função para verificar as credenciais do usuário no banco de dados
+def verificar_credenciais(nick, password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT password_hash FROM usuarios WHERE nick = %s", (nick,))
+    result = cursor.fetchone()
+
+    if result is None:
+        cursor.close()
+        conn.close()
+        return False
+    
+    stored_password_hash = result[0]
+    cursor.close()
+    conn.close()
+    return check_password_hash(stored_password_hash, password)
+
+
+if __name__ == '__main__':
+    if not os.path.exists(app.config['UPLOAD_FOLDER']):
+        os.makedirs(app.config['UPLOAD_FOLDER'])
+    app.run(debug=True)

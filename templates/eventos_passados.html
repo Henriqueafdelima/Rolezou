@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Eventos Passados</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="background-container">
+        <div class="container">
+            <h2>Eventos Passados</h2>
+            <ul class="event-list">
+                {% for evento in eventos_passados %}
+                    <li class="event-item">
+                        <img src="{{ url_for('static', filename='uploads/' ~ evento.imagem) }}" alt="{{ evento.nome_evento }}" class="event-image">
+                        <h3>{{ evento.nome_evento }}</h3>
+                        <p>Data: {{ evento.data_evento }}</p>
+                        <p>Horário: {{ evento.horario_evento }}</p>
+                        <p>Preço: R$ {{ evento.preco }}</p>
+                        <p>Criado por: {{ evento.criado_por }}</p>
+                    </li>
+                {% endfor %}
+            </ul>
+            <a href="{{ url_for('index') }}">Voltar para Eventos</a>
+        </div>
+    </div>
+</body>
+</html>
